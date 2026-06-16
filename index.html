@@ -3,177 +3,191 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🌐 CYBER DUEL ONLINE 🌐</title>
+    <title>🌐 3D CYBER BLAST ONLINE 🌐</title>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body {
-            background-color: #0b0f19;
-            color: #fff;
-            font-family: 'Courier New', Courier, monospace;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-        }
-        #lobby {
-            background: #1e293b;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            margin-bottom: 20px;
-        }
-        input, button {
-            padding: 10px;
-            font-size: 1rem;
-            margin: 5px;
-            border-radius: 5px;
-            border: none;
-        }
-        button {
-            background: #00ffcc;
-            color: #000;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        #game-container { display: none; text-align: center; }
-        canvas {
-            border: 4px solid #ff007f;
-            background: #05070f;
-            box-shadow: 0 0 20px rgba(255, 0, 127, 0.2);
-        }
+        body, html { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: monospace; color: #fff; }
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.7); padding: 15px; border-radius: 8px; border: 1px solid #0f0; }
+        input, button { padding: 8px; margin: 4px 0; border-radius: 4px; border: none; font-family: monospace; font-weight: bold;}
+        button { background: #0f0; color: #000; cursor: pointer; }
+        #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #0f0; font-size: 24px; pointer-events: none; z-index: 5; display: none;}
+        #msg { position: absolute; bottom: 20px; width: 100%; text-align: center; font-size: 20px; color: #ff0055; text-shadow: 0 0 10px #ff0055; }
     </style>
 </head>
 <body>
 
-    <div id="lobby">
-        <h2>🌐 Cyber Duel Online</h2>
-        <p>Your ID: <b id="my-id" style="color:#00ffcc;">Connecting...</b></p>
-        <hr style="border-color: #334155;">
-        <p>Connect to a Friend:</p>
-        <input type="text" id="peer-id-input" placeholder="Enter Friend's ID">
-        <button onclick="connectToPeer()">Connect & Play</button>
-        <p id="status" style="color: #94a3b8;">Initializing network...</p>
-    </div>
+    <div id="crosshair">+</div>
+    <div id="msg"></div>
 
-    <div id="game-container">
-        <h3 id="role-display">Playing...</h3>
-        <canvas id="gameCanvas" width="700" height="400"></canvas>
-        <p style="color: #64748b;">Controls: W (Up) | S (Down) | A (Left) | D (Right)</p>
+    <div id="ui">
+        <h3>⚡ 3D Cyber Blast</h3>
+        <p>Your ID: <b id="my-id" style="color:#0f0;">Connecting...</b></p>
+        <input type="text" id="peer-id" placeholder="Friend's ID"><br>
+        <button onclick="connectToFriend()">Connect & Play</button>
+        <p style="font-size:11px; color:#aaa;">Move: WASD | Shoot: SPACEBAR</p>
     </div>
 
     <script>
-        const canvas = document.getElementById("gameCanvas");
-        const ctx = canvas.getContext("2d");
-        
-        let peer;
-        let conn;
-        let role = ""; // "host" or "guest"
-        
-        // Game States
-        let p1 = { x: 100, y: 180, size: 30, color: "#00ffcc" }; // Host
-        let p2 = { x: 570, y: 180, size: 30, color: "#ff007f" }; // Guest
+        let peer, conn, role = "";
+        let scene, camera, renderer;
+        let me = { x: 0, z: 0, rotY: 0, laser: null };
+        let opponent = { mesh: null, laser: null };
         const keys = {};
 
-        // 1. Initialize PeerJS Connection
-        peer = new Peer();
+        // --- 1. SET UP 3D GRAPHICS ENGINE (Three.js) ---
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x000000, 0.05);
 
-        peer.on('open', (id) => {
-            document.getElementById("my-id").innerText = id;
-            document.getElementById("status").innerText = "Ready! Share your ID or enter a friend's.";
-        });
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
 
-        // 2. LISTEN FOR INCOMING CONNECTIONS (If you are the Host)
-        peer.on('connection', (connection) => {
-            conn = connection;
-            role = "host";
-            setupConnection();
-        });
+            // Neon Grid Floor
+            const grid = new THREE.GridHelper(100, 50, 0x00ff00, 0x222222);
+            grid.position.y = -1;
+            scene.add(grid);
 
-        // 3. INITIATE CONNECTION (If you are the Guest)
-        function connectToPeer() {
-            const peerId = document.getElementById("peer-id-input").value;
-            if (!peerId) return alert("Please enter a valid ID!");
-            
-            document.getElementById("status").innerText = "Connecting...";
-            conn = peer.connect(peerId);
-            role = "guest";
-            setupConnection();
+            // Lighting
+            const light = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(light);
+
+            // Build Opponent Mesh (Neon Pink Cube)
+            const geo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true });
+            opponent.mesh = new THREE.Mesh(geo, mat);
+            scene.add(opponent.mesh);
+
+            // Setup Laser Graphics
+            const laserGeo = new THREE.BoxGeometry(0.2, 0.2, 5);
+            me.laser = new THREE.Mesh(laserGeo, new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+            opponent.laser = new THREE.Mesh(laserGeo, new THREE.MeshBasicMaterial({ color: 0xff0055 }));
+            scene.add(me.laser); scene.add(opponent.laser);
+            me.laser.visible = opponent.laser.visible = false;
+
+            // Start Positions depending on network role
+            me.z = role === "host" ? 15 : -15;
+            me.rotY = role === "host" ? 0 : Math.PI;
+
+            window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+            window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+            document.getElementById("ui").style.display = "none";
+            document.getElementById("crosshair").style.display = "block";
+
+            animate3D();
         }
 
-        // 4. Handle Active Peer Connection
-        function setupConnection() {
-            conn.on('open', () => {
-                document.getElementById("lobby").style.display = "none";
-                document.getElementById("game-container").style.display = "block";
-                document.getElementById("role-display").innerText = role === "host" ? "🔵 HOST (Control Green Box)" : "🔴 GUEST (Control Pink Box)";
-                
-                // Start listening to keystrokes
-                window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-                window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
-                
-                gameLoop();
-            });
+        // --- 2. MULTIPLAYER NETWORKING (PeerJS) ---
+        peer = new Peer();
+        peer.on('open', id => document.getElementById("my-id").innerText = id);
+        
+        // Host Receiver
+        peer.on('connection', c => {
+            conn = c; role = "host";
+            conn.on('open', init3D);
+            setupNetwork();
+        });
 
-            // Receive real-time movement updates from your opponent
-            conn.on('data', (data) => {
-                if (role === "host") {
-                    // Host receives guest position
-                    p2.x = data.x;
-                    p2.y = data.y;
+        // Guest Connector
+        function connectToFriend() {
+            const id = document.getElementById("peer-id").value;
+            conn = peer.connect(id); role = "guest";
+            conn.on('open', init3D);
+            setupNetwork();
+        }
+
+        function setupNetwork() {
+            conn.on('data', data => {
+                // Update opponent coordinates from network pack
+                opponent.mesh.position.set(data.x, 0, data.z);
+                opponent.mesh.rotation.y = data.rot;
+                
+                if (data.shooting) {
+                    opponent.laser.position.set(data.lx, 0, data.lz);
+                    opponent.laser.rotation.y = data.rot;
+                    opponent.laser.visible = true;
                 } else {
-                    // Guest receives host position
-                    p1.x = data.x;
-                    p1.y = data.y;
+                    opponent.laser.visible = false;
+                }
+
+                if (data.hitMe) {
+                    document.getElementById("msg").innerText = "YOU GOT BLASTED!";
+                    setTimeout(() => document.getElementById("msg").innerText = "", 2000);
                 }
             });
         }
 
-        // 5. Game Loop & Networking Engine
-        function gameLoop() {
-            // Handle Local Player Movement
-            let speed = 5;
-            if (role === "host") {
-                if (keys['w'] && p1.y > 0) p1.y -= speed;
-                if (keys['s'] && p1.y < canvas.height - p1.size) p1.y += speed;
-                if (keys['a'] && p1.x > 0) p1.x -= speed;
-                if (keys['d'] && p1.x < canvas.width/2 - p1.size) p1.x += speed; // Locked to left half
-                
-                // Send data to Guest
-                conn.send({ x: p1.x, y: p1.y });
-            } else {
-                if (keys['w'] && p2.y > 0) p2.y -= speed;
-                if (keys['s'] && p2.y < canvas.height - p2.size) p2.y += speed;
-                if (keys['a'] && p2.x > canvas.width/2) p2.x -= speed; // Locked to right half
-                if (keys['d'] && p2.x < canvas.width - p2.size) p2.x += speed;
-                
-                // Send data to Host
-                conn.send({ x: p2.x, y: p2.y });
+        // --- 3. GAME LOOP, CONTROLS & PHYSICS ---
+        let isShooting = false;
+        let hitDetected = false;
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+
+            // Handle Camera Rotation & Movement
+            if (keys['a']) me.rotY += 0.04;
+            if (keys['d']) me.rotY -= 0.04;
+            
+            let speed = 0.2;
+            if (keys['w']) {
+                me.x -= Math.sin(me.rotY) * speed;
+                me.z -= Math.cos(me.rotY) * speed;
+            }
+            if (keys['s']) {
+                me.x += Math.sin(me.rotY) * speed;
+                me.z += Math.cos(me.rotY) * speed;
             }
 
-            // Render Arena
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Bind Camera right behind your character viewpoint (First Person style)
+            camera.position.set(me.x, 0.5, me.z);
+            camera.rotation.y = me.rotY;
 
-            // Center Net Divider
-            ctx.strokeStyle = "rgba(255,255,255,0.1)";
-            ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(350, 0); ctx.lineTo(350, 400); ctx.stroke();
+            // Handle Shooting Input
+            if (keys[' '] && !isShooting) {
+                isShooting = true;
+                me.laser.position.set(me.x, 0, me.z);
+                me.laser.rotation.y = me.rotY;
+                me.laser.visible = true;
 
-            // Draw Player 1 (Host)
-            ctx.shadowBlur = 10; ctx.shadowColor = p1.color;
-            ctx.fillStyle = p1.color;
-            ctx.fillRect(p1.x, p1.y, p1.size, p1.size);
+                // Simple 3D Bullet Raycast collision math
+                // Check if opponent cube is in front of our pointing camera view angle
+                let dist = camera.position.distanceTo(opponent.mesh.position);
+                let targetX = me.x - Math.sin(me.rotY) * dist;
+                let targetZ = me.z - Math.cos(me.rotY) * dist;
+                
+                if (Math.abs(targetX - opponent.mesh.position.x) < 1.5 && Math.abs(targetZ - opponent.mesh.position.z) < 1.5) {
+                    hitDetected = true;
+                    document.getElementById("msg").innerText = "TARGET HIT!";
+                    setTimeout(() => document.getElementById("msg").innerText = "", 1500);
+                }
 
-            // Draw Player 2 (Guest)
-            ctx.shadowColor = p2.color;
-            ctx.fillStyle = p2.color;
-            ctx.fillRect(p2.x, p2.y, p2.size, p2.size);
-            ctx.shadowBlur = 0;
+                setTimeout(() => { isShooting = false; me.laser.visible = false; hitDetected = false; }, 200);
+            }
 
-            requestAnimationFrame(gameLoop);
+            // Animate local laser forward if fired
+            if (isShooting) {
+                me.laser.position.x -= Math.sin(me.rotY) * 1.5;
+                me.laser.position.z -= Math.cos(me.rotY) * 1.5;
+            }
+
+            // Outbound Data Transmission Pack (Keeps packets small/lightweight)
+            conn.send({
+                x: me.x, z: me.z, rot: me.rotY,
+                shooting: isShooting, lx: me.laser.position.x, lz: me.laser.position.z,
+                hitMe: hitDetected
+            });
+
+            renderer.render(scene, camera);
         }
+
+        // Handle Resizing window flawlessly
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
     </script>
 </body>
 </html>
