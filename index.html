@@ -10,8 +10,11 @@
         body, html { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: monospace; color: #fff; user-select: none; touch-action: none; }
         #ui { position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(0,0,0,0.85); padding: 15px; border-radius: 8px; border: 1px solid #0f0; width: 85%; max-width: 320px; }
         input, button { padding: 12px; margin: 6px 0; border-radius: 6px; border: none; font-family: monospace; font-weight: bold; width: 100%; box-sizing: border-box;}
-        input { background: #111; color: #fff; border: 1px solid #333; }
+        input { background: #111; color: #fff; border: 1px solid #333; text-align: center; font-size: 1.2rem; letter-spacing: 2px;}
         button { background: #0f0; color: #000; cursor: pointer; font-size: 1rem; }
+        
+        /* Copy button styling */
+        #copy-btn { background: #334155; color: #fff; padding: 6px 12px; font-size: 11px; display: inline-block; width: auto; margin-left: 10px; border-radius: 4px;}
         
         /* Mobile Touch Zones */
         #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #0f0; font-size: 28px; pointer-events: none; z-index: 5; display: none;}
@@ -37,8 +40,10 @@
 
     <div id="ui">
         <h3>⚡ 3D Cyber Blast Mobile</h3>
-        <p>Your Phone ID:< br><b id="my-id" style="color:#0f0; word-break: break-all;">Connecting...</b></p>
-        <input type="text" id="peer-id" placeholder="Paste Opponent Phone ID"><br>
+        <p>Your Room Code: <b id="my-id" style="color:#0f0; font-size: 1.4rem;">...</b> 
+           <button id="copy-btn" onclick="copyRoomCode()">Copy</button>
+        </p>
+        <input type="number" id="peer-id" placeholder="Enter 4-Digit Code" pattern="\d*"><br>
         <button onclick="connectToFriend()">Connect & Play</button>
     </div>
 
@@ -52,6 +57,9 @@
         let moveTouch = { active: false, startY: 0, currentY: 0 };
         let lookTouch = { active: false, startX: 0, currentX: 0 };
         let triggerShoot = false;
+
+        // Generate a clean 4-digit number for the room code
+        const shortId = Math.floor(1000 + Math.random() * 9000).toString();
 
         // --- 1. INITIALIZE ENGINE & GRAPHICS ---
         function init3D() {
@@ -105,13 +113,11 @@
                 for (let i = 0; i < e.changedTouches.length; i++) {
                     let touch = e.changedTouches[i];
                     
-                    // If tap hits fire button, skip joystick sorting
                     if(touch.target.id === "fire-btn") {
                         triggerShoot = true;
                         continue;
                     }
 
-                    // Split screen: Left half moves, Right half aims
                     if (touch.clientX < window.innerWidth / 2) {
                         moveTouch.active = true;
                         moveTouch.startY = touch.clientY;
@@ -145,9 +151,20 @@
         }
 
         // --- 3. PEERJS MOBILE P2P SYSTEM ---
-        peer = new Peer();
-        peer.on('open', id => document.getElementById("my-id").innerText = id);
+        // Pass the short 4-digit code directly into the Peer constructor
+        peer = new Peer(shortId);
         
+        peer.on('open', id => {
+            document.getElementById("my-id").innerText = id;
+        });
+        
+        peer.on('error', err => {
+            // If ID is taken, just pick another random one automatically
+            if (err.type === 'unavailable-id') {
+                window.location.reload();
+            }
+        });
+
         peer.on('connection', c => {
             conn = c; role = "host";
             conn.on('open', init3D);
@@ -159,6 +176,19 @@
             conn = peer.connect(id); role = "guest";
             conn.on('open', init3D);
             setupNetwork();
+        }
+
+        function copyRoomCode() {
+            navigator.clipboard.writeText(shortId);
+            const copyBtn = document.getElementById("copy-btn");
+            copyBtn.innerText = "Copied!";
+            copyBtn.style.background = "#0f0";
+            copyBtn.style.color = "#000";
+            setTimeout(() => {
+                copyBtn.innerText = "Copy";
+                copyBtn.style.background = "#334155";
+                copyBtn.style.color = "#fff";
+            }, 2000);
         }
 
         function setupNetwork() {
@@ -188,35 +218,29 @@
         function animate3D() {
             requestAnimationFrame(animate3D);
 
-            // Compute Mobile Aiming (Look Touch Drag Delta)
             if (lookTouch.active) {
                 let deltaX = lookTouch.currentX - lookTouch.startX;
-                me.rotY -= deltaX * 0.0005; // Sensitivity tuner
+                me.rotY -= deltaX * 0.0005;
             }
 
-            // Compute Mobile Locomotion (Move Touch Drag Delta)
             if (moveTouch.active) {
                 let deltaY = moveTouch.startY - moveTouch.currentY;
-                let moveSpeed = Math.min(Math.max(deltaY * 0.005, -0.15), 0.15); // Velocity clamp
+                let moveSpeed = Math.min(Math.max(deltaY * 0.005, -0.15), 0.15);
                 
-                // Vector geometry translation matching camera angle
                 me.x -= Math.sin(me.rotY) * moveSpeed;
                 me.z -= Math.cos(me.rotY) * moveSpeed;
             }
 
-            // Lock first-person perspective tracking
             camera.position.set(me.x, 0.4, me.z);
             camera.rotation.y = me.rotY;
 
-            // Combat Fire System
             if (triggerShoot && !isShooting) {
-                triggerShoot = false; // Reset mobile trigger flag
+                triggerShoot = false;
                 isShooting = true;
                 me.laser.position.set(me.x, 0, me.z);
                 me.laser.rotation.y = me.rotY;
                 me.laser.visible = true;
 
-                // Hit Registration Calculations
                 let dist = camera.position.distanceTo(opponent.mesh.position);
                 let targetX = me.x - Math.sin(me.rotY) * dist;
                 let targetZ = me.z - Math.cos(me.rotY) * dist;
@@ -229,7 +253,7 @@
 
                 setTimeout(() => { isShooting = false; me.laser.visible = false; hitDetected = false; }, 250);
             } else {
-                triggerShoot = false; // Wipe out spam triggers
+                triggerShoot = false;
             }
 
             if (isShooting) {
@@ -237,7 +261,6 @@
                 me.laser.position.z -= Math.cos(me.rotY) * 1.6;
             }
 
-            // Send standard light telemetry sync packet
             if (conn && conn.open) {
                 conn.send({
                     x: me.x, z: me.z, rot: me.rotY,
@@ -249,7 +272,6 @@
             renderer.render(scene, camera);
         }
 
-        // Automatic Screen Rescaling
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
